@@ -41,21 +41,34 @@ async function triggerWorkflow() {
 
     console.log("✅ Triggered! Waiting for the workflow to spin up...");
     
-    // Wait for GitHub to register the run
-    await delay(5000);
+    // Poll for the workflow run to appear (GitHub can sometimes take 10-20 seconds to register it)
+    let runsUrl = `https://api.github.com/repos/${USERNAME}/${REPO_NAME}/actions/runs?event=repository_dispatch`;
+    let runsData = null;
+    let attempts = 0;
+    let runId = null;
 
-    const runsUrl = `https://api.github.com/repos/${USERNAME}/${REPO_NAME}/actions/runs?event=repository_dispatch`;
-    let runsReq = await fetch(runsUrl, { headers: { "Authorization": `Bearer ${PAT_TOKEN}`, "User-Agent": "NodeJS-Trigger" } });
-    let runsData = await runsReq.json();
-    
-    if (!runsData.workflow_runs || runsData.workflow_runs.length === 0) {
-      console.error("❌ Could not find the workflow run.");
+    while (attempts < 6) {
+      await delay(5000);
+      let runsReq = await fetch(runsUrl, { headers: { "Authorization": `Bearer ${PAT_TOKEN}`, "User-Agent": "NodeJS-Trigger" } });
+      runsData = await runsReq.json();
+      
+      if (runsData.workflow_runs && runsData.workflow_runs.length > 0) {
+        // Find the most recently created run
+        // Sorting by created_at descending (or just taking the first one if already sorted)
+        runId = runsData.workflow_runs[0].id;
+        break;
+      }
+      process.stdout.write(".");
+      attempts++;
+    }
+
+    if (!runId) {
+      console.error("\n❌ Could not find the workflow run. It might be taking longer than expected, or there is an issue with the workflow file on GitHub.");
+      console.error("\nGitHub API Response:", JSON.stringify(runsData, null, 2));
       return;
     }
 
-    // Get the most recent run
-    const runId = runsData.workflow_runs[0].id;
-    console.log(`⏳ Found workflow run #${runId}. Waiting for it to complete (this takes a minute)...`);
+    console.log(`\n⏳ Found workflow run #${runId}. Waiting for it to complete (this takes a minute)...`);
 
     // Poll until the action completes
     let status = "in_progress";
@@ -79,9 +92,28 @@ async function triggerWorkflow() {
     if (artifactsData.artifacts && artifactsData.artifacts.length > 0) {
       const artifact = artifactsData.artifacts[0];
       const downloadUrl = artifact.archive_download_url;
-      console.log(`\n📦 Artifact found! Download URL:`);
-      console.log(downloadUrl);
-      console.log(`\n(Note: Pass your PAT token in the Authorization header to download the zip file from this URL)`);
+      console.log(`\n📦 Artifact found! Downloading JSON data...`);
+      
+      const zipRes = await fetch(downloadUrl, {
+        headers: { "Authorization": `Bearer ${PAT_TOKEN}`, "User-Agent": "NodeJS-Trigger" }
+      });
+      
+      if (!zipRes.ok) throw new Error(`Failed to download artifact: ${zipRes.statusText}`);
+      
+      const arrayBuffer = await zipRes.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      
+      // Extract in memory
+      const AdmZip = require("adm-zip");
+      const zip = new AdmZip(buffer);
+      const jsonEntry = zip.getEntries().find(e => e.entryName === "reel_data.json");
+      
+      if (jsonEntry) {
+        console.log("\n✅ === REEL DATA === ✅\n");
+        console.log(jsonEntry.getData().toString("utf8"));
+      } else {
+        console.log("❌ reel_data.json not found in the artifact.");
+      }
     } else {
       console.log("❌ No artifacts found for this run.");
     }

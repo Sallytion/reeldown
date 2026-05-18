@@ -30,9 +30,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: parsed-reel-data
-          path: |
-            reel_data.json
-            latest_reel.mp4
+          path: reel_data.json
 
       - name: Send JSON via Webhook (Optional)
         # If you provide a webhook_url in your API request, this step sends the JSON back to you
