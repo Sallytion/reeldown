@@ -1,0 +1,43 @@
+name: Scrape Latest Reel
+
+on:
+  repository_dispatch:
+    types: [scrape_reel]  # Trigger via API webhook
+  workflow_dispatch:      # Allow manual runs via UI or API
+
+jobs:
+  scrape-and-send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          npm init -y
+          npm install playwright axios
+          npx playwright install --with-deps chromium
+
+      - name: Run script
+        run: node igrs.js
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: parsed-reel-data
+          path: |
+            reel_data.json
+            latest_reel.mp4
+
+      - name: Send JSON via Webhook (Optional)
+        # If you provide a webhook_url in your API request, this step sends the JSON back to you
+        if: github.event.client_payload.webhook_url != ''
+        run: |
+          curl -X POST -H "Content-Type: application/json" \
+               -d @reel_data.json \
+               ${{ github.event.client_payload.webhook_url }}
